@@ -147,11 +147,11 @@ public class CameraView extends FrameLayout {
     private CameraViewImpl createCameraViewImpl(Context context, PreviewImpl preview, CallbackBridge callbackBridge) {
         if (CameraHelper.getInstance(getContext()).shouldUseCamera1()) {//只使用Camera1的方案
             CameraLog.i(TAG, "createCameraViewImpl, sdk version = %d, create Camera1 (for previous experience)", Build.VERSION.SDK_INT);
-            return new Camera1(callbackBridge, preview);
+            return new Camera1(callbackBridge, preview,getContext());
         } else {//根据版本可能使用Camera2的方案
             if (Build.VERSION.SDK_INT < 21) {
                 CameraLog.i(TAG, "createCameraViewImpl, sdk version = %d, create Camera1", Build.VERSION.SDK_INT);
-                return new Camera1(callbackBridge, preview);
+                return new Camera1(callbackBridge, preview,getContext());
             } else if (Build.VERSION.SDK_INT < 23) {
                 CameraLog.i(TAG, "createCameraViewImpl, sdk version = %d, create Camera2", Build.VERSION.SDK_INT);
                 return new Camera2(callbackBridge, preview, context);
@@ -256,7 +256,7 @@ public class CameraView extends FrameLayout {
             if (mPreviewImpl == null || mPreviewImpl.getView() == null) {//可以避免重复创建，只是替换CameraView，不用替换PreviewImpl的实现，预览组件的大小也维持之前的设置 (aspect ratio没变)
                 mPreviewImpl = createPreviewImpl(getContext());
             }
-            mCameraViewImpl = new Camera1(mCallbackBridge, mPreviewImpl);
+            mCameraViewImpl = new Camera1(mCallbackBridge, mPreviewImpl,getContext());
             onRestoreInstanceState(state);
             isSuccess = mCameraViewImpl.start();
             if (isSuccess) {

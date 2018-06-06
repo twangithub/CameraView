@@ -18,6 +18,9 @@ package com.google.android.cameraview;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
+import android.app.Application;
+import android.content.Context;
+import android.graphics.ImageFormat;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
@@ -26,6 +29,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.support.v4.util.SparseArrayCompat;
 import android.view.MotionEvent;
+import android.view.OrientationEventListener;
 import android.view.SurfaceHolder;
 import android.view.View;
 
@@ -77,9 +81,10 @@ class Camera1 extends CameraViewImpl {
 
     private Handler mHandler = new Handler();
     private Camera.AutoFocusCallback mAutofocusCallback;//这个貌似并没有起到作用，后期考虑删除
-
-    public Camera1(Callback callback, PreviewImpl preview) {
+    private Context mContext;
+    public Camera1(Callback callback, PreviewImpl preview, Context context) {
         super(callback, preview);
+        mContext=context;
         if (mPreview != null) {
             mPreview.setCallback(new PreviewImpl.Callback() {
                 @Override
@@ -91,6 +96,7 @@ class Camera1 extends CameraViewImpl {
                 }
             });
         }
+
     }
 
     @Override
@@ -404,6 +410,7 @@ class Camera1 extends CameraViewImpl {
     }
 
     private void adjustCameraParameters() {
+        chooseMyPreViewRatio();//获取最大的分辨率
         SortedSet<Size> sizes = mPreviewSizes.sizes(mAspectRatio);
         if (sizes == null) { // Not supported
             CameraLog.i(TAG, "adjustCameraParameters, ratio[%s] is not supported", mAspectRatio);
@@ -411,7 +418,7 @@ class Camera1 extends CameraViewImpl {
             sizes = mPreviewSizes.sizes(mAspectRatio);
             CameraLog.i(TAG, "adjustCameraParameters, change to ratio to %s", mAspectRatio);
         }
-        Size previewSize = choosePreviewSize(sizes);
+        Size previewSize = sizes.last();// twan modify -choosePreviewSize(sizes);
 
         // Always re-apply camera parameters
         //final Size pictureSize = mPictureSizes.sizes(mAspectRatio).last();// Largest picture size in this ratio
@@ -423,6 +430,15 @@ class Camera1 extends CameraViewImpl {
 
         mCameraParameters.setPreviewSize(previewSize.getWidth(), previewSize.getHeight());
         mCameraParameters.setPictureSize(pictureSize.getWidth(), pictureSize.getHeight());
+//        //twan_start
+//        mCameraParameters.setPictureFormat(ImageFormat.JPEG);
+//        mCameraParameters.setJpegQuality(100);
+//        mCameraParameters.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);// 默认进来关闭闪光灯
+//        mCameraParameters.setWhiteBalance(Camera.Parameters.WHITE_BALANCE_AUTO);
+//        myPreviewSizes = CameraUtil.getInstance().getPropSizeForHeight(mCameraParameters.getSupportedPreviewSizes(), 800);
+//        myPictureSizes = CameraUtil.getInstance().getPropSizeForHeight(mCameraParameters.getSupportedPictureSizes(), 800);
+//        //twan_end
+
         mCameraParameters.setRotation(calcCameraRotation(mDisplayOrientation));
         setAutoFocusInternal(mAutoFocus);
         setFlashInternal(mFlash);
@@ -475,35 +491,57 @@ class Camera1 extends CameraViewImpl {
         return aspectRatio;
     }
 
+    private void chooseMyPreViewRatio(){
+        Camera.Size myPreviewSizes = CameraUtil.getInstance().getPropSizeForHeight(mCameraParameters.getSupportedPreviewSizes(), 800);
+        Set<AspectRatio> ratioSet = mPreviewSizes.ratios();
+        for (AspectRatio ratio: ratioSet) {
+            SortedSet<Size> sizeSet = mPreviewSizes.sizes(ratio);
+            for (Size size : sizeSet) {
+                if (size.getWidth() == myPreviewSizes.width && size.getHeight()==myPreviewSizes.height){
+                    mAspectRatio = ratio;
+                    break;
+                }
+            }
+        }
+    }
+
     /**
      * 这里针对具体需求调整最合适的宽高比和输出图片大小
      * 对于不同的手机而言，大部分都支持16:9(4:3)的比例，同时大部分也都支持输出1920x1080(800x600)的图片大小，图片文件大小大概在500KB(200KB)左右
      */
     private Size choosePictureSize() {
-        if (mAspectRatio.equals(Constants.DEFAULT_ASPECT_RATIO)) {
-            SortedSet<Size> sizes = mPictureSizes.sizes(mAspectRatio);
-            Size[] preferedSizes = new Size[] {new Size(1920, 1080), new Size(1280, 720)};//几个比较合适的输出大小
-            for (Size size : preferedSizes) {
-                if (sizes.contains(size)) {
-                    return size;
-                }
-            }
-            //前面几个合适的大小都没有的话，那么就使用中间那个大小
+        //twan
+        SortedSet<Size> sizes = mPictureSizes.sizes(mAspectRatio);
+        if (sizes == null || sizes.size()==0){
             return getMiddleSize(sizes);
-        } else if (mAspectRatio.equals(Constants.SECOND_ASPECT_RATIO)) {
-            SortedSet<Size> sizes = mPictureSizes.sizes(mAspectRatio);
-            Size[] preferedSizes = new Size[] {new Size(1440, 1080), new Size(1280, 960), new Size(1024, 768), new Size(800, 600)};//几个比较合适的输出大小
-            for (Size size : preferedSizes) {
-                if (sizes.contains(size)) {
-                    return size;
-                }
-            }
-            //前面几个合适的大小都没有的话，那么就使用中间那个大小
-            return getMiddleSize(sizes);
-        } else {
-            SortedSet<Size> sizes = mPictureSizes.sizes(mAspectRatio);
-            return getMiddleSize(sizes);
+        }else {
+            return sizes.last();
         }
+
+//        if (mAspectRatio.equals(Constants.DEFAULT_ASPECT_RATIO)) {
+//            SortedSet<Size> sizes = mPictureSizes.sizes(mAspectRatio);
+//            Size[] preferedSizes = new Size[] {new Size(1920, 1080), new Size(1280, 720)};//几个比较合适的输出大小
+//            for (Size size : preferedSizes) {
+//                if (sizes.contains(size)) {
+//                    return size;
+//                }
+//            }
+//            //前面几个合适的大小都没有的话，那么就使用中间那个大小
+//            return getMiddleSize(sizes);
+//        } else if (mAspectRatio.equals(Constants.SECOND_ASPECT_RATIO)) {
+//            SortedSet<Size> sizes = mPictureSizes.sizes(mAspectRatio);
+//            Size[] preferedSizes = new Size[] {new Size(1440, 1080), new Size(1280, 960), new Size(1024, 768), new Size(800, 600)};//几个比较合适的输出大小
+//            for (Size size : preferedSizes) {
+//                if (sizes.contains(size)) {
+//                    return size;
+//                }
+//            }
+//            //前面几个合适的大小都没有的话，那么就使用中间那个大小
+//            return getMiddleSize(sizes);
+//        } else {
+//            SortedSet<Size> sizes = mPictureSizes.sizes(mAspectRatio);
+//            return getMiddleSize(sizes);
+//        }
     }
 
     //前面几个合适的大小都没有的话，那么就使用中间那个大小 (即使是中间这个大小也并不能保证它满足我们的需求，比如得到的图片还是很大，但是这种情况实在太少了)
@@ -771,5 +809,40 @@ class Camera1 extends CameraViewImpl {
             return normalized;
         }
     }
+
+//twan
+//    private int rotationFlag=0 ;
+//    private OrientationEventListener orientationEventListener1 ;
+//
+//    private void initOrientation(){
+//        orientationEventListener1 = new OrientationEventListener(mContext) {
+//            @Override
+//            public void onOrientationChanged(int rotation) {
+//                if (((rotation >= 0) && (rotation <= 30)) || (rotation >= 330)) {
+//                    rotationFlag = 180;
+//                } else if (((rotation >= 230) && (rotation <= 310))) {
+//                    rotationFlag = 270;
+//                } else if (rotation > 30 && rotation < 95) {
+//                    rotationFlag = 90;
+//                }
+//
+//                updateCameraPara();
+//            }
+//        };
+//        orientationEventListener1.enable();
+//    }
+//
+//    private Camera.Size myPreviewSizes;
+//    private Camera.Size myPictureSizes;
+//    private void updateCameraPara(){
+//        if (rotationFlag == 90 || rotationFlag==270) {
+//            //横屏
+//            mCameraParameters.setPreviewSize(myPreviewSizes.height,myPreviewSizes.width);
+//            mCameraParameters.setPictureSize(myPictureSizes.height,myPictureSizes.width);
+//        }else {
+//            mCameraParameters.setPreviewSize(myPreviewSizes.width,myPreviewSizes.height);
+//            mCameraParameters.setPictureSize(myPictureSizes.width,myPictureSizes.height);
+//        }
+//    }
 
 }
