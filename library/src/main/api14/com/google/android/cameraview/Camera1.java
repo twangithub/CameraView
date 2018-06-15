@@ -53,6 +53,8 @@ class Camera1 extends CameraViewImpl {
 
     private static final SparseArrayCompat<String> FLASH_MODES = new SparseArrayCompat<>();
 
+    private Size maxPixelPictureSize;//拍照支持的最大像素size
+
     static {
         FLASH_MODES.put(Constants.FLASH_OFF, Camera.Parameters.FLASH_MODE_OFF);
         FLASH_MODES.put(Constants.FLASH_ON, Camera.Parameters.FLASH_MODE_ON);
@@ -375,8 +377,15 @@ class Camera1 extends CameraViewImpl {
 
         // Supported picture sizes;
         mPictureSizes.clear();
+        long maxpixel=0;
         for (Camera.Size size : mCameraParameters.getSupportedPictureSizes()) {
-            mPictureSizes.add(new Size(size.width, size.height));
+            Size sitemp=new Size(size.width, size.height);
+            mPictureSizes.add(sitemp);
+            int sizep = size.width*size.height;
+            if (size.width*size.height > maxpixel){
+                maxpixel=sizep;
+                maxPixelPictureSize = sitemp;
+            }
         }
         CameraLog.i(TAG, "openCamera, supportedPictureSizes: " + mPictureSizes);
 
@@ -410,7 +419,8 @@ class Camera1 extends CameraViewImpl {
     }
 
     private void adjustCameraParameters() {
-        chooseMyPreViewRatio();//获取最大的分辨率
+        //chooseMyPreViewRatio();//获取最大的分辨率
+        setBestAspectRatioByMaxPictureSize();//获取拍照最大的分辨率, 然后根据这个分辨率去选preview的最大分辨率
         SortedSet<Size> sizes = mPreviewSizes.sizes(mAspectRatio);
         if (sizes == null) { // Not supported
             CameraLog.i(TAG, "adjustCameraParameters, ratio[%s] is not supported", mAspectRatio);
@@ -422,7 +432,7 @@ class Camera1 extends CameraViewImpl {
 
         // Always re-apply camera parameters
         //final Size pictureSize = mPictureSizes.sizes(mAspectRatio).last();// Largest picture size in this ratio
-        Size pictureSize = choosePictureSize();
+        Size pictureSize = maxPixelPictureSize;//choosePictureSize();
 
         if (mShowingPreview) {
             mCamera.stopPreview();//在重新设置CameraParameters之前需要停止预览
@@ -542,6 +552,10 @@ class Camera1 extends CameraViewImpl {
 //            SortedSet<Size> sizes = mPictureSizes.sizes(mAspectRatio);
 //            return getMiddleSize(sizes);
 //        }
+    }
+
+    private AspectRatio setBestAspectRatioByMaxPictureSize(){
+        return mAspectRatio = AspectRatio.of(maxPixelPictureSize.getWidth(), maxPixelPictureSize.getHeight());
     }
 
     //前面几个合适的大小都没有的话，那么就使用中间那个大小 (即使是中间这个大小也并不能保证它满足我们的需求，比如得到的图片还是很大，但是这种情况实在太少了)
