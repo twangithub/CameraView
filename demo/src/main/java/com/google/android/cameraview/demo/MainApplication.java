@@ -17,6 +17,11 @@
 package com.google.android.cameraview.demo;
 
 import android.app.Application;
+import android.content.Context;
+import android.os.Build;
+import android.util.DisplayMetrics;
+import android.view.Display;
+import android.view.WindowManager;
 
 import com.facebook.drawee.backends.pipeline.Fresco;
 
@@ -32,4 +37,7 @@ public class MainApplication extends Application {
 
         Fresco.initialize(this);
     }
+
+
+
 }

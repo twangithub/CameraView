@@ -16,7 +16,12 @@
 
 package com.google.android.cameraview;
 
+import android.graphics.Point;
+import android.hardware.Camera;
 import android.view.View;
+import android.widget.ImageView;
+
+import com.google.android.cameraview.fingerFeedBack.FocusImageView;
 
 import java.util.Set;
 
@@ -55,6 +60,17 @@ abstract class CameraViewImpl {
         }
     }
 
+    boolean onFocus(Point point,Camera.AutoFocusCallback callback){
+        return false;
+    }
+
+    public Camera.AutoFocusCallback getAutoFocusCallback(){
+        return null;
+    }
+
+    void setMarkerView(FocusImageView view){
+
+    }
 
     /**
      * 抽象方法

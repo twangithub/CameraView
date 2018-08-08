@@ -21,17 +21,24 @@ import android.annotation.TargetApi;
 import android.app.Application;
 import android.content.Context;
 import android.graphics.ImageFormat;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
+import android.hardware.camera2.CameraManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.support.v4.util.SparseArrayCompat;
+import android.util.Log;
 import android.view.MotionEvent;
 import android.view.OrientationEventListener;
 import android.view.SurfaceHolder;
 import android.view.View;
+import android.widget.ImageView;
+
+import com.google.android.cameraview.fingerFeedBack.FocusImageView;
+import com.google.android.cameraview.fingerFeedBack.SensorControler;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -84,6 +91,9 @@ class Camera1 extends CameraViewImpl {
     private Handler mHandler = new Handler();
     private Camera.AutoFocusCallback mAutofocusCallback;//这个貌似并没有起到作用，后期考虑删除
     private Context mContext;
+    private SensorControler mSensorControler;
+    private FocusImageView mFocusImageView;
+
     public Camera1(Callback callback, PreviewImpl preview, Context context) {
         super(callback, preview);
         mContext=context;
@@ -98,6 +108,30 @@ class Camera1 extends CameraViewImpl {
                 }
             });
         }
+
+        //add Twan 2018/08/07
+        mSensorControler = SensorControler.getInstance(context);
+        mAutofocusCallback = new Camera.AutoFocusCallback() {
+
+            @Override
+            public void onAutoFocus(boolean success, Camera camera) {
+                //聚焦之后根据结果修改图片
+                if (success) {
+                    if (mFocusImageView !=null) mFocusImageView.onFocusSuccess();
+                } else {
+                    //聚焦失败显示的图片，由于未找到合适的资源，这里仍显示同一张图片
+                    if (mFocusImageView !=null) mFocusImageView.onFocusFailed();
+                }
+                mHandler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        //一秒之后才能再次对焦
+                        mSensorControler.unlockFocus();
+                    }
+                }, 1000);
+            }
+        };
+
 
     }
 
@@ -257,6 +291,7 @@ class Camera1 extends CameraViewImpl {
 
     @Override
     void takePicture() {
+        mSensorControler.lockFocus();
         if (!isCameraOpened()) {
             //throw new IllegalStateException("Camera is not ready. Call start() before takePicture().");
             CameraLog.i(TAG, "Camera is not ready, call start() before takePicture()");
@@ -402,6 +437,7 @@ class Camera1 extends CameraViewImpl {
         mCamera.setDisplayOrientation(calcDisplayOrientation(mDisplayOrientation));
 
         mCallback.onCameraOpened();
+
     }
 
     //删除在图片预览大小中那些没有必要的大小，因为这些大小在输出图片中不可能有这个比例(宽高比) => 为了保证预览图片、输出图片和AspectRatio三个的比例值是一样的才行！
@@ -797,7 +833,9 @@ class Camera1 extends CameraViewImpl {
                 }
             }
         }, DELAY_MILLIS_BEFORE_RESETTING_FOCUS);
+
     }
+
 
     private Rect calculateFocusArea(float x, float y) {
         int buffer = getFocusAreaSize() / 2;
@@ -858,5 +896,74 @@ class Camera1 extends CameraViewImpl {
 //            mCameraParameters.setPictureSize(myPictureSizes.width,myPictureSizes.height);
 //        }
 //    }
+
+    @Override
+    void setMarkerView(FocusImageView view) {
+        mFocusImageView = view;
+    }
+
+    @Override
+    public Camera.AutoFocusCallback getAutoFocusCallback(){
+        return mAutofocusCallback;
+    }
+
+    @Override
+    protected boolean onFocus(Point point, Camera.AutoFocusCallback callback) {
+        if (mCamera == null) {
+            return false;
+        }
+
+        Camera.Parameters parameters = null;
+        try {
+            parameters = mCamera.getParameters();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+        //不支持设置自定义聚焦，则使用自动聚焦，返回
+
+        if(Build.VERSION.SDK_INT >= 14) {
+
+            if (parameters.getMaxNumFocusAreas() <= 0) {
+                return focus(callback);
+            }
+
+            Log.i(TAG, "onCameraFocus:" + point.x + "," + point.y);
+
+            List<Camera.Area> areas = new ArrayList<Camera.Area>();
+            int left = point.x - 300;
+            int top = point.y - 300;
+            int right = point.x + 300;
+            int bottom = point.y + 300;
+            left = left < -1000 ? -1000 : left;
+            top = top < -1000 ? -1000 : top;
+            right = right > 1000 ? 1000 : right;
+            bottom = bottom > 1000 ? 1000 : bottom;
+            areas.add(new Camera.Area(new Rect(left, top, right, bottom), 100));
+            parameters.setFocusAreas(areas);
+            try {
+                //本人使用的小米手机在设置聚焦区域的时候经常会出异常，看日志发现是框架层的字符串转int的时候出错了，
+                //目测是小米修改了框架层代码导致，在此try掉，对实际聚焦效果没影响
+                mCamera.setParameters(parameters);
+            } catch (Exception e) {
+                // TODO: handle exception
+                e.printStackTrace();
+                return false;
+            }
+        }
+
+
+        return focus(callback);
+    }
+
+    private boolean focus(Camera.AutoFocusCallback callback) {
+        try {
+            mCamera.autoFocus(callback);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+        return true;
+    }
 
 }

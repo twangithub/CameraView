@@ -18,9 +18,15 @@ package com.google.android.cameraview;
 
 import android.content.Context;
 import android.content.res.TypedArray;
+import android.graphics.Point;
+import android.media.AudioManager;
+import android.media.SoundPool;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Message;
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.os.SystemClock;
 import android.support.annotation.IntDef;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
@@ -28,9 +34,17 @@ import android.support.v4.os.ParcelableCompat;
 import android.support.v4.os.ParcelableCompatCreatorCallbacks;
 import android.support.v4.view.ViewCompat;
 import android.util.AttributeSet;
+import android.util.DisplayMetrics;
+import android.util.FloatMath;
+import android.view.Display;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.FrameLayout;
+
+import com.google.android.cameraview.fingerFeedBack.FocusImageView;
+import com.google.android.cameraview.fingerFeedBack.SensorControler;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -68,6 +82,9 @@ public class CameraView extends FrameLayout {
     private CameraViewImpl mCameraViewImpl;
     private final CallbackBridge mCallbackBridge;
     private final DisplayOrientationDetector mDisplayOrientationDetector;
+
+    private SensorControler mSensorControler;
+    private FocusImageView mFocusImageView;
 
     public CameraView(Context context) {
         this(context, null);
@@ -114,15 +131,38 @@ public class CameraView extends FrameLayout {
             }
         };
 
-        // Focus marker
+        // Focus marker 聚焦方式1
+//        final FocusMarkerView mFocusMarkerView = new FocusMarkerView(getContext());
+//        addView(mFocusMarkerView);
+//        mFocusMarkerView.setOnTouchListener(new OnTouchListener() {
+//            @Override
+//            public boolean onTouch(View v, MotionEvent motionEvent) {
+//                int action = motionEvent.getAction();
+//                if (action == MotionEvent.ACTION_UP) {
+//                    mFocusMarkerView.focus(motionEvent.getX(), motionEvent.getY());
+//                }
+//
+//                if (mPreviewImpl != null && mPreviewImpl.getView() != null) {
+//                    mPreviewImpl.getView().dispatchTouchEvent(motionEvent);
+//                }
+//                return true;
+//            }
+//        });
+
+
+        // 聚焦方式2 finger feedback add Twan 2018/8/7  start
+        mFocusImageView = new FocusImageView(getContext());
+        addView(mFocusImageView);
+
         final FocusMarkerView mFocusMarkerView = new FocusMarkerView(getContext());
         addView(mFocusMarkerView);
+        //这里要使用FocusMarkerView#OnTouchListener事件
         mFocusMarkerView.setOnTouchListener(new OnTouchListener() {
             @Override
             public boolean onTouch(View v, MotionEvent motionEvent) {
                 int action = motionEvent.getAction();
                 if (action == MotionEvent.ACTION_UP) {
-                    mFocusMarkerView.focus(motionEvent.getX(), motionEvent.getY());
+                    onCameraFocus(new Point((int)(motionEvent.getX()), (int)motionEvent.getY()));
                 }
 
                 if (mPreviewImpl != null && mPreviewImpl.getView() != null) {
@@ -131,6 +171,19 @@ public class CameraView extends FrameLayout {
                 return true;
             }
         });
+
+        mSensorControler = SensorControler.getInstance(getContext());
+        mSensorControler.setCameraFocusListener(new SensorControler.CameraFocusListener() {
+            @Override
+            public void onFocus() {
+                getScreenSize();
+                Point point = new Point(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+
+                onCameraFocus(point);
+            }
+        });
+        mCameraViewImpl.setMarkerView(mFocusImageView);
+        //end
     }
 
     //@NonNull
@@ -266,6 +319,10 @@ public class CameraView extends FrameLayout {
                 CameraLog.i(TAG, "start camera with Camera1 fail");
             }
         }
+
+        if (mSensorControler!=null) mSensorControler.onStart();
+        mSoundPool = getSoundPool();
+
         return isSuccess;
     }
 
@@ -274,6 +331,11 @@ public class CameraView extends FrameLayout {
      */
     public void stop() {
         CameraLog.i(TAG, "stop camera");
+
+        if (mSensorControler!=null) mSensorControler.onStop();
+        mSoundPool.release();
+        mSoundPool = null;
+
         mCameraViewImpl.stop();
     }
 
@@ -502,4 +564,73 @@ public class CameraView extends FrameLayout {
         CameraLog.i(TAG, "onRestoreInstanceState: facing = %d, autofocus = %s, flash = %d, ratio = %s", getFacing(), getAutoFocus(), getFlash(), getAspectRatio());
     }
 
+
+    public static int SCREEN_WIDTH = -1;
+    public static int SCREEN_HEIGHT = -1;
+    public void getScreenSize() {
+        WindowManager windowManager = (WindowManager)getContext().getSystemService(Context.WINDOW_SERVICE);
+        DisplayMetrics dm = new DisplayMetrics();
+        Display display = windowManager.getDefaultDisplay();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            display.getRealMetrics(dm);//实际
+        }else {
+            display.getMetrics(dm);//可用
+        }
+        SCREEN_WIDTH = dm.widthPixels;
+        SCREEN_HEIGHT = dm.heightPixels;
+        if(SCREEN_WIDTH > SCREEN_HEIGHT) {
+            int t = SCREEN_HEIGHT;
+            SCREEN_HEIGHT = SCREEN_WIDTH;
+            SCREEN_WIDTH = t;
+        }
+
+    }
+
+    private void onCameraFocus(final Point point) {
+        onCameraFocus(point, false);
+    }
+
+    /**
+     * 相机对焦
+     *
+     * @param point
+     * @param needDelay 是否需要延时
+     */
+    public void onCameraFocus(final Point point, boolean needDelay) {
+        long delayDuration = needDelay ? 300 : 0;
+
+        new Handler().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (!mSensorControler.isFocusLocked()) {
+                    if (mCameraViewImpl.onFocus(point, mCameraViewImpl.getAutoFocusCallback())) {
+                        mSensorControler.lockFocus();
+                        mFocusImageView.startFocus(point);
+                        //播放对焦音效
+                        if(mFocusSoundPrepared) {
+                            mSoundPool.play(mFocusSoundId, 1.0f, 0.5f, 1, 0, 1.0f);
+                        }
+                    }
+                }
+            }
+        }, delayDuration);
+    }
+
+    private SoundPool mSoundPool;
+    private boolean mFocusSoundPrepared;
+    private int mFocusSoundId;
+    private SoundPool getSoundPool(){
+        if(mSoundPool == null) {
+            mSoundPool = new SoundPool(5, AudioManager.STREAM_MUSIC, 0);
+            mFocusSoundId = mSoundPool.load(getContext(),R.raw.camera_focus,1);
+            mFocusSoundPrepared = false;
+            mSoundPool.setOnLoadCompleteListener(new SoundPool.OnLoadCompleteListener() {
+                @Override
+                public void onLoadComplete(SoundPool soundPool, int sampleId, int status) {
+                    mFocusSoundPrepared = true;
+                }
+            });
+        }
+        return mSoundPool;
+    }
 }
